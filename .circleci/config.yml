@@ -1,11 +1,8 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine. 
-# See: https://circleci.com/docs/2.0/configuration-reference
 version: 2.1
 
 orbs:
   cloudshell-colony: quali/cloudshell-colony@1.0.4
-  
-jobs:
+  jobs:
   build:
     docker:
       - image: 'circleci/ruby:2.4.1'
@@ -20,42 +17,49 @@ jobs:
           name: Fetch Details
       - colony/end-sandbox:
           sandbox-id: SANDBOX_ID
-orbs:
-  colony: quali/cloudshell-colony@1
-version: 2.1
 workflows:
   easy:
     jobs:
       - build
-
-  build-and-test:  
-    # These next lines define a Docker executor: https://circleci.com/docs/2.0/executor-types/
-    # You can specify an image from Dockerhub or use one of our Convenience Images from CircleCI's Developer Hub.
-    # A list of available CircleCI Docker Convenience Images are available here: https://circleci.com/developer/images/image/cimg/node
+      jobs:
+  build-and-publish:
     docker:
-      - image: cimg/node:15.1
-    # Then run your tests!
-    # CircleCI will report the results back to your VCS provider.
+      - image: 'circleci/ruby:2.4.1'
     steps:
-      # Checkout the code as the first step.
       - checkout
-      # Next, the node orb's install-packages step will install the dependencies from a package.json.
-      # The orb install-packages step will also automatically cache them for faster future runs.
-      - node/install-packages
-      # If you are using yarn instead npm, remove the line above and uncomment the two lines below.
-      # - node/install-packages:
-      #     pkg-manager: yarn 
       - run:
-          name: Run tests
-          command: npm test
-
+          command: |
+            mkdir -p workspace
+            tar -zcf my-webapp.latest.tar.gz -C my_app/ .
+          name: Archive app
+      - aws-s3/copy:
+          from: my-webapp.latest.tar.gz
+          to: 's3://my-webapp-artifacts/latest/'
+orbs:
+  aws-s3: circleci/aws-s3@1.0.11
+  colony: quali/cloudshell-colony@1.0
+version: 2.1
 workflows:
-  # Below is the definition of your workflow.
-  # Inside the workflow, you provide the jobs you want to run, e.g this workflow runs the build-and-test job above.
-  # CircleCI will run this workflow on every commit.
-  # For more details on extending your workflow, see the configuration docs: https://circleci.com/docs/2.0/configuration-reference/#workflows
-  sample: 
+  leadeasy:
     jobs:
-      - build-and-test
-      # For running simple node tests, you could optionally use the node/test job from the orb to replicate and replace the job above in fewer lines.
-      # - node/test
+      - build-and-publish
+      - colony/sandbox:
+          artifacts: '{''webapp-frontend'':''latest/my-webapp.latest.tar.gz''}'
+          blueprint: my-web-application
+          inputs: '{''AWS_INSTANCE_TYPE'': ''m5.large''}'
+          name: Test Application
+          requires:
+            - build-and-publish
+          sandbox-name: test-sandbox
+          steps:
+            - run: echo "Do some testing here"
+            - run:
+                command: >
+                  echo "Getting application endpoint"
+
+                  SB_ENDPOINT="SB_${SANDBOX_ID}_SHORTCUT_1"
+
+                  echo "Checking ${!SB_ENDPOINT}"
+
+                  curl --write-out "%{http_code}\n" --silent --output /dev/null
+                  "${!SB_ENDPOINT}" 
